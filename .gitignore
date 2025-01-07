@@ -1,0 +1,10 @@
+
+data/
+*.pyc
+__pycache__/
+env/
+.env
+*.log
+
+# Config files
+config.ini
