@@ -3,8 +3,15 @@ data/
 *.pyc
 __pycache__/
 env/
-.env
+.venv
 *.log
+.vscode
 
 # Config files
 config.ini
+
+# vector_db
+vector_db
+
+# models cache
+models_cache

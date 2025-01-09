@@ -34,7 +34,7 @@ class RAGApp:
             if "history" not in st.session_state:
                 st.session_state.history = []
             
-            for i, chat in enumerate(reversed(st.session_state.history)):
+            for i, chat in enumerate(st.session_state.history):
                 st_message(**chat, key=str((i))) # Unpack messages
         
         st.text_input("", key="request", on_change=self.generate_answer)
