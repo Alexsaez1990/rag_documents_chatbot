@@ -11,8 +11,9 @@ from langchain import hub
 from langchain_core.runnables import RunnablePassthrough
 from langchain.schema import StrOutputParser, Document
 from langchain.prompts import PromptTemplate
-from transformers import GPT2Tokenizer, AutoModel, AutoModelForCausalLM, AutoTokenizer
+from transformers import GPT2Tokenizer, AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer
+from huggingface_hub import hf_hub_download
 
 
 config = configparser.ConfigParser()
@@ -27,12 +28,13 @@ class RAGModel():
     def __init__(self):
         self.file_documents_path = "./data/pdf_documents"
         self.path_vector_store = "./vector_db"
-        #self.model_name = "google/flan-t5-large"
-        self.model_name = "EleutherAI/gpt-neo-1.3B"
+        self.cache_models_path = "./cache_models"
+        self.model_name = "google/flan-t5-large"
+        #self.model_name = "EleutherAI/gpt-neo-1.3B"
         #self.model_name = "EleutherAI/gpt-neo-125M"
         self.embeddings = HuggingFaceEmbeddings( # NOT USE GPT MODEL FOR EMBEDDINGS
             model_name="google/flan-t5-large",
-            model_kwargs={'device':'cuda'},
+            model_kwargs={'device':'cpu'},
             encode_kwargs={'normalize_embeddings':True}
         ) 
         self.load_data()
@@ -100,42 +102,45 @@ class RAGModel():
         """
         self.retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
     
+    from transformers import AutoTokenizer, AutoModelForCausalLM
     def generate(self, request:str):
         """
         """
-        llm = HuggingFaceHub(
-            repo_id=self.model_name,
-            model_kwargs={"temperature":0.1, "max_length":200}
-        )
 
+        tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=self.cache_models_path)
+        llm = AutoModelForSeq2SeqLM.from_pretrained(self.model_name, cache_dir=self.cache_models_path)
+
+        retrieved_docs = self.retriever.get_relevant_documents(request)
+        retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
+        print(f"RETRIEVED CONTEXT: {retrieved_context}")
         def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
+            return "n\n".join(doc.page_content for doc in docs)
         
-        objective_prompt = PromptTemplate.from_template(
-            """ 
-            Eres un asistente que extrae ideas clave de documentos de negocios para ayudar a mejorar una empresa.
-            Enfócate en identificar los puntos clave, las áreas relevantes para mejorar y las recomendaciones importantes.
-            Responde de forma concisa en viñetas, destacando solo la información más relevante.
-            Si no hay suficiente información, di: "No se encontraron ideas accionables.
+        chunks = [retrieved_context[i: i + 512] for i in range(0, len(retrieved_context), 512)]
 
-            Contexto del documento:
-            {context}
+        response = ""
+        for chunk in chunks:
+            objective_prompt = PromptTemplate.from_template(
+                f""" 
+                Contexto del documento:
+                {chunk}
 
-            Pregunta: {question}
-            Respuesta:
-            """
-        )
+                Pregunta: {request}
 
-        rag_chain = (
-            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
-            | objective_prompt
-            | llm
-            | StrOutputParser()
-        )
-        #print("RAG chain context:", {"context": self.retriever | format_docs, "question": RunnablePassthrough()})
+                Respuesta:
+                """
+            ).format(context=retrieved_context, question=request)
 
+            
+
+            inputs = tokenizer(objective_prompt, return_tensors="pt", max_length=1024, truncation=True)
+            outputs = llm.generate(**inputs, max_length=512, temperature=0.7, do_sample=True)
+            chunk_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+            response += chunk_response + "\n"
+        print(f"RESPONSE: {response}")
         try:
-            response = "".join(chunk for chunk in rag_chain.stream(request))
+            #response = "".join(chunk for chunk in rag_chain.stream(request))
             return self.clean_response(response)
         except Exception as e:
             print(f"Error during generation {e}")
@@ -154,6 +159,9 @@ class RAGModel():
                 cleaned_lines.append(clean_line)
         
         return "\n".join(cleaned_lines)
+    
+    def retrieve_model(self):
+        hf_hub_download(self.model_name, filename="pytorch_model.bin", cache_dir=self.cache_models_path)
     
 import re
 def clean_text(text):

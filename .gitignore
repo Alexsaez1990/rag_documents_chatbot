@@ -14,4 +14,4 @@ config.ini
 vector_db
 
 # models cache
-models_cache
+cache_models
