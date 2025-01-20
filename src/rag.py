@@ -11,7 +11,7 @@ from langchain import hub
 from langchain_core.runnables import RunnablePassthrough
 from langchain.schema import StrOutputParser, Document
 from langchain.prompts import PromptTemplate
-from transformers import GPT2Tokenizer, AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import GPT2Tokenizer, AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer, AutoModelForCausalLM, AutoConfig 
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import hf_hub_download
 
@@ -29,11 +29,11 @@ class RAGModel():
         self.file_documents_path = "./data/pdf_documents"
         self.path_vector_store = "./vector_db"
         self.cache_models_path = "./cache_models"
-        self.model_name = "google/flan-t5-large"
+        #self.model_name = "google/flan-t5-large"
         #self.model_name = "EleutherAI/gpt-neo-1.3B"
-        #self.model_name = "EleutherAI/gpt-neo-125M"
-        self.embeddings = HuggingFaceEmbeddings( # NOT USE GPT MODEL FOR EMBEDDINGS
-            model_name="google/flan-t5-large",
+        self.model_name = "meta-llama/Llama-3.1-8B" # Use huggingface-cli login for meta huggingface models
+        self.embeddings = HuggingFaceEmbeddings( # NOT USING GPT MODEL FOR EMBEDDINGS
+            model_name="meta-llama/Llama-3.1-8B",
             model_kwargs={'device':'cpu'},
             encode_kwargs={'normalize_embeddings':True}
         ) 
@@ -102,13 +102,13 @@ class RAGModel():
         """
         self.retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
     
-    from transformers import AutoTokenizer, AutoModelForCausalLM
     def generate(self, request:str):
         """
         """
-
-        tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=self.cache_models_path)
-        llm = AutoModelForSeq2SeqLM.from_pretrained(self.model_name, cache_dir=self.cache_models_path)
+        config = AutoConfig.from_pretrained(self.model_name)
+        tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=self.cache_models_path, config=config)
+        
+        llm = AutoModelForSeq2SeqLM.from_pretrained(self.model_name, cache_dir=self.cache_models_path, config=config)
 
         retrieved_docs = self.retriever.get_relevant_documents(request)
         retrieved_context = "\n".join([doc.page_content for doc in retrieved_docs])
@@ -131,10 +131,9 @@ class RAGModel():
                 """
             ).format(context=retrieved_context, question=request)
 
-            
-
-            inputs = tokenizer(objective_prompt, return_tensors="pt", max_length=1024, truncation=True)
-            outputs = llm.generate(**inputs, max_length=512, temperature=0.7, do_sample=True)
+            inputs = tokenizer(objective_prompt, return_tensors="pt", max_length=512, truncation=True, padding="max_length")
+            print(f"INPUTS KEYS: {inputs.keys()}")
+            outputs = llm.generate(input_ids=inputs["input_ids"], attention_mask=inputs.get("attention_mask"), max_length=512, temperature=0.7, do_sample=True)
             chunk_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             response += chunk_response + "\n"
@@ -174,7 +173,7 @@ def clean_text(text):
 
 # Cosas pendientes:
 # - Ver que diga cosas con más sentido. La salida es sucia y se ve el prompt y todo. Se debería poder limpiar eso
-# - Guardar el modelo en local -> Importante para poder trabajar con modelos grandes
 # - Ver cómo limitar el tamaño de la respuesta
 # - Probar otros documentos
 # - Probar tamaños splitter
+# - Memoria en las respuestas
